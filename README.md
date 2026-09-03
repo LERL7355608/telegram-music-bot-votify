@@ -1,8 +1,9 @@
 # Telegram Music Bot
 
-> Estado de esta copia: experimento Votify conservado para continuar cuando el
-> proveedor corrija su autenticacion PlayPlay. Consulta
-> [`docs/AI_HANDOFF.md`](docs/AI_HANDOFF.md) antes de desplegarlo.
+> Estado de esta copia: el bot funciona de punta a punta con `PROVIDER=mock`,
+> verificable con `python smoke_test.py`. El experimento Votify sigue archivado
+> y **no descarga**: espera a que el proveedor corrija su autenticacion PlayPlay.
+> Consulta [`docs/AI_HANDOFF.md`](docs/AI_HANDOFF.md) antes de desplegarlo.
 
 Bot privado de Telegram para gestionar busquedas y descargas con arquitectura Provider.
 
@@ -54,9 +55,16 @@ FILE_EXPIRY_HOURS=12
 PROVIDER=mock
 ```
 
-Para obtener tu `TELEGRAM_USER_ID`, puedes escribirle a bots como `@userinfobot`.
+`TELEGRAM_USER_ID` es **obligatorio**: es la allowlist del bot y el proceso se
+niega a arrancar si esta vacia. Acepta un ID o varios separados por coma
+(`12345678,87654321`). Para obtener el tuyo, escribele a `@userinfobot`.
 
 ## Ejecucion local
+
+Requiere **Python 3.11, 3.12 o 3.13**. En Python 3.14 el arranque truena con
+`RuntimeError: There is no current event loop in thread 'MainThread'`: es una
+incompatibilidad de `python-telegram-bot` 21.x, no del bot. La imagen de Docker
+usa `python:3.12-slim`, asi que el despliegue con Docker no se ve afectado.
 
 ```bash
 python -m venv .venv
@@ -79,6 +87,19 @@ El servidor de archivos queda disponible en:
 ```text
 http://localhost:8080/download/{token}
 ```
+
+## Prueba de humo
+
+Valida config, allowlist, rate limit y el flujo completo
+(provider -> cola -> SQLite -> storage -> HTTP) sin necesidad de un token real
+de Telegram ni de red:
+
+```bash
+python smoke_test.py
+```
+
+Usa `PROVIDER=mock` y directorios temporales; no toca tu `.env` ni tu base de
+datos. Ejecutalo antes de cualquier despliegue.
 
 ## Docker
 
@@ -213,9 +234,24 @@ Estados usados:
 
 ## Seguridad aplicada
 
-- Whitelist por `TELEGRAM_USER_ID`.
-- Rate limit en memoria por usuario.
-- Tokens unicos por descarga.
-- Expiracion por SQLite antes de servir archivo.
-- `Cache-Control: no-store`.
-- Logs con rotacion.
+Cada punto indica donde se aplica, para que sea auditable:
+
+- **Allowlist obligatoria.** `is_allowed()` en `handlers/search.py` compara contra
+  `settings.telegram_user_ids`. Se aplica en los cuatro puntos de entrada:
+  `/start`, callbacks (`handlers/callbacks.py`), inline query y chosen inline
+  result (`handlers/inline.py`), y mensajes de texto (`handlers/playlist.py`).
+- **Fail closed.** `config.py` lanza `RuntimeError` en el arranque si
+  `TELEGRAM_USER_ID` esta vacia o no es numerica. No existe el modo "abierto".
+- **Rate limit por usuario.** `InMemoryRateLimiter` (`services/rate_limit.py`),
+  ventana deslizante de 1 hora con tope `MAX_DOWNLOADS_PER_HOUR`. Se cobra en
+  `handlers/download.py` (1 slot por cancion) y en `handlers/playlist.py`
+  (1 slot por ZIP de playlist, sin importar cuantas canciones traiga).
+- **Tokens unicos por descarga.** `secrets.token_urlsafe(32)` en `services/storage.py`.
+- **Expiracion verificada antes de servir.** `services/file_server.py` revisa
+  `expires_at` contra SQLite y responde `410 Gone` si ya vencio.
+- **`Cache-Control: no-store`** en las respuestas de archivo.
+- **Logs con rotacion** (`logging_config.py`).
+
+El rate limit vive en memoria: se reinicia junto con el proceso. Es una defensa
+contra el uso excesivo de la propia allowlist, no contra un atacante externo.
+Contra eso protege la allowlist.
