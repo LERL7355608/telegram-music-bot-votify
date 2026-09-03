@@ -37,6 +37,22 @@ Proveedores presentes:
 - `custom`: proveedor anterior conservado como referencia.
 - `votify`: experimento actual con Spotify Web API, Votify CLI y ffmpeg.
 
+## Seguridad: leer antes de exponer el puerto
+
+Hasta el commit `76683cb` la seguridad descrita en el README no existia en el
+codigo: `is_allowed()` retornaba `user is not None` (o sea, cualquier persona) y
+el `InMemoryRateLimiter` nunca se instanciaba. Ya esta corregido:
+
+- La allowlist se aplica en los cuatro puntos de entrada y `config.py` **falla
+  en el arranque** si `TELEGRAM_USER_ID` esta vacia.
+- El rate limiter esta conectado en `bot.py` y se cobra en descarga individual y
+  en ZIP de playlist.
+- `python smoke_test.py` verifica ambos, mas el flujo completo con `mock`.
+
+Si una version futura toca `handlers/` o `config.py`, correr `smoke_test.py`
+antes de desplegar. No volver a describir una defensa en el README sin
+verificar que exista un punto de aplicacion en el codigo.
+
 ## Funciones existentes del bot
 
 - busqueda inline de canciones
@@ -108,14 +124,17 @@ Instalacion limpia:
 
 ```bash
 cp .env.example .env
+# editar .env: TELEGRAM_BOT_TOKEN y TELEGRAM_USER_ID son obligatorios
 mkdir -p config logs storage storage/downloads
+python smoke_test.py
 docker compose up -d --build
 curl -fsS http://127.0.0.1:8080/health
 docker compose logs --tail=100 bot
 ```
 
 Primero debe validarse `PROVIDER=mock`. Solo despues se configura Votify con
-los secretos locales.
+los secretos locales. El contenedor trae `HEALTHCHECK`, asi que
+`docker compose ps` muestra `healthy` cuando el servidor de archivos responde.
 
 ## Criterio para reanudar
 
@@ -126,7 +145,7 @@ Cuando exista una nueva version de Votify:
 3. Probar una sola cancion en un directorio temporal.
 4. Confirmar que Pathfinder y PlayPlay responden correctamente.
 5. Verificar que el archivo final existe, tiene audio valido y metadata.
-6. Ejecutar el bot con `mock` y luego con `votify`.
+6. Ejecutar `python smoke_test.py`, luego el bot con `mock` y luego con `votify`.
 7. Desplegar en EC2 solo despues de las pruebas anteriores.
 
 No subir cookies, tokens, DLL, WVD, archivos descargados ni logs de solicitudes
