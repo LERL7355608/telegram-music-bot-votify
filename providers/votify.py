@@ -19,7 +19,7 @@ import subprocess
 import urllib.parse
 from pathlib import Path
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -53,7 +53,7 @@ class VotifyProvider(DownloadProvider):
             )
 
     def _get_access_token(self) -> str:
-        if self._token and self._token_expires_at and datetime.utcnow() < self._token_expires_at:
+        if self._token and self._token_expires_at and datetime.now(timezone.utc) < self._token_expires_at:
             return self._token
 
         self._ensure_credentials()
@@ -67,7 +67,7 @@ class VotifyProvider(DownloadProvider):
         data = resp.json()
         self._token = data["access_token"]
         expires_in = data.get("expires_in", 3600)
-        self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in - 60)
+        self._token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in - 60)
         return self._token
 
     def _spotify_get(self, endpoint: str) -> dict:
