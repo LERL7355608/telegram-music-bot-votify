@@ -129,6 +129,15 @@ async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFA
         ref,
         bool(inline_message_id),
     )
+
+    settings: Settings = context.application.bot_data["settings"]
+    if not is_allowed(update, settings):
+        logger.warning(
+            "Rejected unauthorized chosen inline result user_id=%s",
+            chosen.from_user.id if chosen.from_user else None,
+        )
+        return
+
     if not inline_message_id:
         return
 

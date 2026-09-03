@@ -27,20 +27,35 @@ def _get_int(name: str, default: int) -> int:
         raise RuntimeError(f"Environment variable {name} must be an integer") from exc
 
 
-def _get_optional_int(name: str) -> int | None:
-    value = os.getenv(name)
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise RuntimeError(f"Environment variable {name} must be an integer") from exc
+def _get_user_allowlist(name: str) -> frozenset[int]:
+    """Parse the private-bot allowlist. Fails closed: an empty value is a startup error."""
+    raw = os.getenv(name, "")
+    user_ids: set[int] = set()
+    for chunk in raw.replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            user_ids.add(int(chunk))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Environment variable {name} must be a comma-separated list of numeric "
+                f"Telegram user IDs; got {chunk!r}"
+            ) from exc
+
+    if not user_ids:
+        raise RuntimeError(
+            f"{name} is empty. This bot is private and refuses to start without an allowlist. "
+            f"Set {name} to your numeric Telegram user ID (comma-separated for several users). "
+            "Ask @userinfobot for yours."
+        )
+    return frozenset(user_ids)
 
 
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
-    telegram_user_id: int | None
+    telegram_user_ids: frozenset[int]
     download_path: Path
     database_path: Path
     logs_path: Path
@@ -68,7 +83,7 @@ class Settings:
 
         return cls(
             telegram_bot_token=_get_required("TELEGRAM_BOT_TOKEN"),
-            telegram_user_id=_get_optional_int("TELEGRAM_USER_ID"),
+            telegram_user_ids=_get_user_allowlist("TELEGRAM_USER_ID"),
             download_path=download_path,
             database_path=database_path,
             logs_path=logs_path,

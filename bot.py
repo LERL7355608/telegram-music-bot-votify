@@ -27,6 +27,7 @@ from services.database import DownloadRepository
 from services.file_server import FileServer
 from services.lyrics import LrcLibLyricsProvider
 from services.queue import DownloadQueue
+from services.rate_limit import InMemoryRateLimiter
 from services.storage import build_storage
 from services.track_cache import TrackCache
 
@@ -187,6 +188,7 @@ def build_application(settings: Settings) -> Application:
     application.bot_data["file_server"] = file_server
     application.bot_data["download_queue"] = download_queue
     application.bot_data["cleanup_service"] = cleanup_service
+    application.bot_data["rate_limiter"] = InMemoryRateLimiter(settings.max_downloads_per_hour)
     application.bot_data["track_cache"] = TrackCache(ttl_minutes=30)
     application.bot_data["playlist_cache"] = TrackCache(ttl_minutes=60, max_items=100)
 
@@ -203,7 +205,12 @@ def main() -> None:
     settings.ensure_directories()
     configure_logging(settings.logs_path)
 
-    logger.info("Starting telegram music bot")
+    logger.info(
+        "Starting telegram music bot provider=%s allowlist=%s users rate_limit=%s/h",
+        settings.provider_name,
+        len(settings.telegram_user_ids),
+        settings.max_downloads_per_hour,
+    )
     application = build_application(settings)
     application.run_polling(close_loop=False)
 

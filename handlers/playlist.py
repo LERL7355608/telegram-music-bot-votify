@@ -17,10 +17,12 @@ from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 from config import Settings
+from handlers.search import is_allowed
 from providers.base import DownloadProvider
 from services.database import DownloadRepository
 from services.lyrics import LrcLibLyricsProvider
 from services.storage import LocalStorage, S3Storage, StoredFile
+from services.rate_limit import InMemoryRateLimiter
 from services.track_cache import TrackCache
 
 
@@ -43,6 +45,12 @@ async def handle_playlist_message(update: Update, context: ContextTypes.DEFAULT_
     message = update.effective_message
     user = update.effective_user
     if message is None or user is None:
+        return
+
+    settings: Settings = context.application.bot_data["settings"]
+    if not is_allowed(update, settings):
+        logger.warning("Rejected unauthorized message user_id=%s", user.id)
+        await message.reply_text("No tienes permiso para usar este bot.")
         return
 
     repository: DownloadRepository = context.application.bot_data["repository"]
@@ -180,6 +188,17 @@ async def enqueue_playlist_zip(update: Update, context: ContextTypes.DEFAULT_TYP
     playlist = _playlist_from_cache(context, ref)
     if playlist is None:
         await query.edit_message_text("Esa playlist expiro. Vuelve a pegar el link.")
+        return
+
+    settings: Settings = context.application.bot_data["settings"]
+    rate_limiter: InMemoryRateLimiter = context.application.bot_data["rate_limiter"]
+    if not rate_limiter.allow(user.id):
+        logger.info("Rate limited playlist zip user_id=%s", user.id)
+        await query.edit_message_text(
+            f"⚠️ Limite alcanzado: {settings.max_downloads_per_hour} descargas por hora.\n"
+            "Intenta de nuevo mas tarde.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Volver", callback_data="home")]]),
+        )
         return
 
     app_data = context.application.bot_data

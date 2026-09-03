@@ -6,8 +6,10 @@ from typing import Any
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from config import Settings
 from services.database import DownloadRepository
 from services.queue import DownloadJob, DownloadQueue
+from services.rate_limit import InMemoryRateLimiter
 from services.track_cache import TrackCache
 
 
@@ -83,6 +85,20 @@ async def _enqueue_track_download(
     duration = str(track.get("duration", ""))
     cover_url = _cover_url(track)
     has_media = force_has_media or bool(message and (message.photo or message.video or message.animation or message.document))
+
+    settings: Settings = context.application.bot_data["settings"]
+    rate_limiter: InMemoryRateLimiter = context.application.bot_data["rate_limiter"]
+    if not rate_limiter.allow(user.id):
+        logger.info("Rate limited download user_id=%s track_id=%s", user.id, track.get("id"))
+        limit_text = (
+            f"⚠️ Limite alcanzado: {settings.max_downloads_per_hour} descargas por hora.\n"
+            "Intenta de nuevo mas tarde."
+        )
+        if has_media:
+            await query.edit_message_caption(caption=limit_text)
+        else:
+            await query.edit_message_text(limit_text)
+        return
 
     await _send_preview_if_available(context, chat.id if chat is not None else None, track, title, artist, cover_url)
 
